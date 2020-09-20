@@ -170,7 +170,15 @@ private extension EKEventStore {
     }
 
     func availableEvents(withStart startDate: Date = Date()) -> AnyBidirectionalCollection<EKEvent> {
-        let predicate = predicateForEvents(withStart: startDate, end: .distantFuture, calendars: nil)
+        let calendar = Calendar.current
+        guard let endDate = calendar
+                .date(byAdding: .init(day: 1), to: startDate)
+                .map(calendar.startOfDay(for:))
+                .map({ $0.addingTimeInterval(-1) }) else {
+            return AnyBidirectionalCollection([])
+        }
+
+        let predicate = predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
         let eligibleEvents = events(matching: predicate)
             .lazy
             .filter { !$0.isAllDay && $0.status != .canceled }
@@ -191,7 +199,11 @@ private extension EKEvent {
             dateFormatter.formattingContext = .beginningOfSentence
             components.append(dateFormatter.localizedString(for: startDate, relativeTo: Date()))
         } else {
-            let dateFormatter = DateFormatter.dateFormatter(forCalendarEvent: self)
+            let dateFormatter = DateFormatter()
+            dateFormatter.locale = .current
+            dateFormatter.doesRelativeDateFormatting = true
+            dateFormatter.timeStyle = .short
+            dateFormatter.dateStyle = .none
             components.append(dateFormatter.string(from: startDate))
         }
 
@@ -209,44 +221,6 @@ private extension EKEvent {
         components.append(title)
 
         return components.joined(separator: " ").truncated(to: 40)
-    }
-}
-
-private extension DateFormatter {
-    static func canUseRelativeDateFormatting(for date: Date) -> Bool {
-        let normalFormatter = self.init()
-        let relativeFormatter = self.init()
-        relativeFormatter.doesRelativeDateFormatting = true
-        return relativeFormatter.string(from: date) != normalFormatter.string(from: date)
-    }
-
-    static func dateFormatter(forCalendarEvent calendarEvent: EKEvent) -> Self {
-        let calendar = Calendar.current
-
-        let dateFormatter = self.init()
-        dateFormatter.locale = .current
-
-        if self.canUseRelativeDateFormatting(for: calendarEvent.startDate) {
-            dateFormatter.doesRelativeDateFormatting = true
-            dateFormatter.timeStyle = .short
-            dateFormatter.dateStyle = calendar.isDateInToday(calendarEvent.startDate) ? .none : .short
-        } else {
-            var dateFormatComponents: [String] = []
-
-            if !calendar.isDateInToday(calendarEvent.startDate) {
-                if calendar.isDate(calendarEvent.startDate, equalTo: Date(), toGranularity: .year) {
-                    dateFormatComponents.append("dd/MM")
-                } else {
-                    dateFormatComponents.append("dd/MM/yyyy")
-                }
-            }
-
-            dateFormatComponents.append("HH:mm")
-
-            dateFormatter.setLocalizedDateFormatFromTemplate(dateFormatComponents.joined(separator: " "))
-        }
-
-        return dateFormatter
     }
 }
 
