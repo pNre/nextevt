@@ -16,7 +16,7 @@
 
 /* Begin PBXFileReference section */
 		C10DAAEC251273520059BD93 /* NextEvt.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NextEvt.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		C10DAAEF251273520059BD93 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		C10DAAEF251273520059BD93 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; wrapsLines = 0; };
 		C10DAAF3251273530059BD93 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C10DAAFB251273530059BD93 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		C10DAAFC251273530059BD93 /* NextEvt.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NextEvt.entitlements; sourceTree = "<group>"; };

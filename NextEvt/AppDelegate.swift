@@ -18,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+    private var scheduledWorkItems: [String: [DispatchWorkItem]] = [:]
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         refresh()
@@ -35,35 +36,80 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 private extension AppDelegate {
     @objc func refresh() {
         eventStore.attempt { eventStore in
-            eventStore.NextEvt()
+            eventStore.nextEvent()
         } completion: { result in
             switch result {
             case let .success(event?):
-                self.statusBarItem.button?.title = event
-                    .displayString(includingDuration: self.preferences.showEventDuration)
-                self.scheduleRefresh(for: event)
+                self.update(with: event)
             case .success:
                 self.statusBarItem.button?.title = "・"
             case .failure(let error):
                 self.statusBarItem.button?.title = "・"
                 NSApplication.shared.presentError(error)
             }
+
+            self.scheduleRefresh()
         }
     }
 
-    func scheduleRefresh(for event: EKEvent) {
-        NSObject.cancelPreviousPerformRequests(withTarget: self)
-        eventStore.attempt { eventStore -> Date? in
-            eventStore.nextRefreshDate()
+    @objc func update(with event: EKEvent) {
+        statusBarItem.button?.title = event
+            .displayString(includingDuration: preferences.showEventDuration)
+
+        scheduleRefresh()
+    }
+
+    func scheduleRefresh() {
+        eventStore.attempt { eventStore -> AnyBidirectionalCollection<EKEvent> in
+            eventStore.availableEvents()
         } completion: { result in
             switch result {
-            case let .success(nextDate?):
-                self.perform(#selector(self.refresh), with: nil, afterDelay: nextDate.timeIntervalSinceNow)
-            case .success,
-                 .failure:
+            case let .success(events):
+                self.pruneScheduledWorkItems(for: events)
+
+                events.forEach { event in
+                    self.cancelWorkItems(for: event)
+
+                    if event.startDate.timeIntervalSinceNow > 0 {
+                        let delay = max(1, event.startDate.addingTimeInterval(-60).timeIntervalSinceNow)
+                        self.scheduleWorkItem(for: event, after: delay) { [weak self] in
+                            self?.update(with: event)
+                        }
+                    }
+
+                    self.scheduleWorkItem(for: event, after: event.endDate.timeIntervalSinceNow + 1) { [weak self] in
+                        self?.refresh()
+                    }
+                }
+            case .failure:
                 break
             }
         }
+    }
+}
+
+private extension AppDelegate {
+    func pruneScheduledWorkItems<C: Collection>(for events: C) where C.Element == EKEvent {
+        let eventIds = Set(events.compactMap { $0.eventIdentifier })
+        let scheduledEventIds = Set(scheduledWorkItems.keys)
+
+        scheduledEventIds.subtracting(eventIds).forEach { key in
+            self.scheduledWorkItems.removeValue(forKey: key)
+        }
+    }
+
+    func cancelWorkItems(for event: EKEvent) {
+        scheduledWorkItems[event.eventIdentifier]?.forEach {
+            $0.cancel()
+        }
+
+        scheduledWorkItems[event.eventIdentifier]?.removeAll()
+    }
+
+    func scheduleWorkItem(for event: EKEvent, after delay: TimeInterval, _ work: @escaping () -> Void) {
+        let workItem = DispatchWorkItem(block: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+        scheduledWorkItems[event.eventIdentifier, default: []].append(workItem)
     }
 }
 
@@ -107,25 +153,17 @@ private extension AppDelegate {
 }
 
 private extension EKEventStore {
-    func attempt<T>(_ task: @escaping (EKEventStore) throws -> T, completion: @escaping (Result<T, Error>) -> Void) {
+    func attempt<T>(_ f: @escaping (EKEventStore) throws -> T, completion: @escaping (Result<T, Error>) -> Void) {
         switch EKEventStore.authorizationStatus(for: .event) {
         case .authorized:
-            do {
-                completion(.success(try task(self)))
-            } catch let error {
-                completion(.failure(error))
-            }
+            completion(Result(catching: { try f(self) }))
         case .notDetermined:
             requestAccess(to: .event) { granted, error in
                 DispatchQueue.main.async {
                     if let error = error {
                         completion(.failure(error))
                     } else {
-                        do {
-                            completion(.success(try task(self)))
-                        } catch let error {
-                            completion(.failure(error))
-                        }
+                        completion(Result(catching: { try f(self) }))
                     }
                 }
             }
@@ -137,44 +175,20 @@ private extension EKEventStore {
         }
     }
 
-    func NextEvt() -> EKEvent? {
+    func nextEvent() -> EKEvent? {
         let events = availableEvents()
         let presentEvents = events.prefix { $0.isHappeningNow }
         let futureEvents = events.dropFirst(presentEvents.count)
 
-        if presentEvents.isEmpty {
-            return futureEvents.first
-        }
-
-        return presentEvents.max { lhs, rhs in
+        let mostRecentPresentEvent = presentEvents.max { lhs, rhs in
             lhs.startDate < rhs.startDate
         }
+
+        return mostRecentPresentEvent ?? futureEvents.first
     }
 
-    func nextRefreshDate() -> Date? {
-        availableEvents()
-            .flatMap { [$0.startDate, $0.endDate] }
-            .filter { $0.timeIntervalSinceNow > 0 }
-            .min()
-            .map { date in
-                guard date.isWithinHour else {
-                    return date
-                }
-
-                guard date.timeIntervalSinceNow > 60 else {
-                    return Date(timeIntervalSinceNow: 1)
-                }
-
-                return min(Date(timeIntervalSinceNow: 60), date)
-            }
-    }
-
-    func availableEvents(withStart startDate: Date = Date()) -> AnyBidirectionalCollection<EKEvent> {
-        let calendar = Calendar.current
-        guard let endDate = calendar
-                .date(byAdding: .init(day: 1), to: startDate)
-                .map(calendar.startOfDay(for:))
-                .map({ $0.addingTimeInterval(-1) }) else {
+    func availableEvents(startingFrom startDate: Date = Date()) -> AnyBidirectionalCollection<EKEvent> {
+        guard let endDate = Calendar.current.endOfDay(for: startDate) else {
             return AnyBidirectionalCollection([])
         }
 
@@ -237,5 +251,13 @@ private extension String {
 private extension Date {
     var isWithinHour: Bool {
         (0..<(60 * 60)).contains(timeIntervalSinceNow)
+    }
+}
+
+private extension Calendar {
+    func endOfDay(for date: Date) -> Date? {
+        self.date(byAdding: .init(day: 1), to: date)
+            .map(startOfDay(for:))
+            .map { $0.addingTimeInterval(-1) }
     }
 }
