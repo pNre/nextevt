@@ -12,4 +12,9 @@ struct Preferences {
         get { UserDefaults.standard.bool(forKey: "showEventDuration") }
         set { UserDefaults.standard.set(newValue, forKey: "showEventDuration") }
     }
+
+    var useSmallerFont: Bool {
+        get { UserDefaults.standard.bool(forKey: "useSmallerFont") }
+        set { UserDefaults.standard.set(newValue, forKey: "useSmallerFont") }
+    }
 }

@@ -14,7 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var preferences = Preferences() {
         didSet {
             DispatchQueue.main.async {
-                self.refresh()
+                self.preferencesDidChange()
             }
         }
     }
@@ -34,7 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 private extension AppDelegate {
-    @objc func refresh() {
+    func refresh() {
         eventStore.attempt { eventStore in
             eventStore.nextEvent()
         } completion: { result in
@@ -52,7 +52,7 @@ private extension AppDelegate {
         }
     }
 
-    @objc func update(with event: EKEvent) {
+    func update(with event: EKEvent) {
         statusBarItem.button?.title = event
             .displayString(includingDuration: preferences.showEventDuration)
 
@@ -114,11 +114,18 @@ private extension AppDelegate {
 }
 
 private extension AppDelegate {
+    func preferencesDidChange() {
+        refresh()
+        statusBarItem.button?.font = preferences.preferredStatusBarFont
+    }
+}
+
+private extension AppDelegate {
     func makeStatusItem() -> NSStatusItem {
         let statusBar = NSStatusBar.system
         statusBarItem = statusBar.statusItem(withLength: NSStatusItem.variableLength)
         statusBarItem.button?.title = "・"
-        statusBarItem.button?.font = .menuBarFont(ofSize: NSFont.systemFontSize(for: .small))
+        statusBarItem.button?.font = preferences.preferredStatusBarFont
         statusBarItem.button?.sendAction(on: .leftMouseUp)
         statusBarItem.menu = makeMenu()
         return statusBarItem
@@ -127,6 +134,7 @@ private extension AppDelegate {
     func makeMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(makePreferenceToggleMenuItem(for: \.showEventDuration, title: "Event duration"))
+        menu.addItem(makePreferenceToggleMenuItem(for: \.useSmallerFont, title: "Use a smaller font"))
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(terminateApp), keyEquivalent: ""))
         return menu
     }
@@ -259,5 +267,15 @@ private extension Calendar {
         self.date(byAdding: .init(day: 1), to: date)
             .map(startOfDay(for:))
             .map { $0.addingTimeInterval(-1) }
+    }
+}
+
+private extension Preferences {
+    var preferredStatusBarFont: NSFont {
+        .menuBarFont(
+            ofSize: NSFont.systemFontSize(
+                for: useSmallerFont ? .small : .regular
+            )
+        )
     }
 }
