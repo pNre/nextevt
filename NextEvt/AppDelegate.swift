@@ -135,6 +135,9 @@ private extension AppDelegate {
         let menu = NSMenu()
         menu.addItem(makePreferenceToggleMenuItem(for: \.showEventDuration, title: "Event duration"))
         menu.addItem(makePreferenceToggleMenuItem(for: \.useSmallerFont, title: "Use a smaller font"))
+        menu.addItem(.separator())
+        menu.addItem(makePreferenceToggleMenuItem(for: \.launchAtLogin, title: "Launch at login"))
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(terminateApp), keyEquivalent: ""))
         return menu
     }

@@ -6,11 +6,15 @@ let package = Package(
     platforms: [
         .macOS(.v10_15),
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/sindresorhus/LaunchAtLogin", from: "4.0.0")
+    ],
     targets: [
         .target(
             name: "NextEvt",
-            dependencies: [],
+            dependencies: [
+                "LaunchAtLogin"
+            ],
             path: "NextEvt"
         )
     ]

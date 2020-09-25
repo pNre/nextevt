@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import LaunchAtLogin
 
 struct Preferences {
     var showEventDuration: Bool {
@@ -16,5 +17,10 @@ struct Preferences {
     var useSmallerFont: Bool {
         get { UserDefaults.standard.bool(forKey: "useSmallerFont") }
         set { UserDefaults.standard.set(newValue, forKey: "useSmallerFont") }
+    }
+
+    var launchAtLogin: Bool {
+        get { LaunchAtLogin.isEnabled }
+        set { LaunchAtLogin.isEnabled = newValue }
     }
 }
