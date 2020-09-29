@@ -222,7 +222,9 @@ private extension EKEvent {
         if startDate.isWithinHour {
             let dateFormatter = RelativeDateTimeFormatter()
             dateFormatter.formattingContext = .beginningOfSentence
-            components.append(dateFormatter.localizedString(for: startDate, relativeTo: Date()))
+            dateFormatter.dateTimeStyle = .named
+            let now = Date()
+            components.append(dateFormatter.localizedString(for: max(startDate, now), relativeTo: now))
         } else {
             let dateFormatter = DateFormatter()
             dateFormatter.locale = .current
@@ -261,7 +263,7 @@ private extension String {
 
 private extension Date {
     var isWithinHour: Bool {
-        (0..<(60 * 60)).contains(timeIntervalSinceNow)
+        timeIntervalSinceNow < 60 * 60
     }
 }
 

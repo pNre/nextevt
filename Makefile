@@ -5,6 +5,7 @@ BUILD_DIRECTORY = ./.build/${PLATFORM}/release
 APP_DIRECTORY=./.build/${APPNAME}.app
 APP_CONTENTS="${APP_DIRECTORY}/Contents"
 CFBUNDLEEXECUTABLE=${APPNAME}
+VERSION=`git tag | sort -V | tail -1 | cut -c2-`
 
 install: build bundle codesign
 
@@ -20,6 +21,7 @@ bundle:
 	/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier me.pierluigi.${APPNAME}" ${APP_CONTENTS}/Info.plist
 	/usr/libexec/PlistBuddy -c "Set :CFBundlePackageType APPL" ${APP_CONTENTS}/Info.plist
 	/usr/libexec/PlistBuddy -c "Set :CFBundleName ${APPNAME}" ${APP_CONTENTS}/Info.plist
+	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" ${APP_CONTENTS}/Info.plist
 	/usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion 10.15" ${APP_CONTENTS}/Info.plist
 	cp ${BUILD_DIRECTORY}/${CFBUNDLEEXECUTABLE} ${APP_CONTENTS}/MacOS/
 	mkdir -p "${APP_CONTENTS}/Library/LoginItems"
