@@ -70,10 +70,15 @@ private extension AppDelegate {
                 events.forEach { event in
                     self.cancelWorkItems(for: event)
 
-                    if event.startDate.timeIntervalSinceNow > 0 {
-                        let delay = max(1, event.startDate.addingTimeInterval(-60).timeIntervalSinceNow)
+                    let intervalSinceStart = event.startDate.timeIntervalSinceNow
+                    if intervalSinceStart > 0 {
+                        let delay: TimeInterval = intervalSinceStart > 60 ? 60 : 1
                         self.scheduleWorkItem(for: event, after: delay) { [weak self] in
                             self?.update(with: event)
+                        }
+                    } else if intervalSinceStart > -60 {
+                        self.scheduleWorkItem(for: event, after: intervalSinceStart + 60) { [weak self] in
+                            self?.refresh()
                         }
                     }
 
@@ -144,7 +149,11 @@ private extension AppDelegate {
 
     func makePreferenceToggleMenuItem(for preference: WritableKeyPath<Preferences, Bool>, title: String) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: #selector(performAssociatedBlock), keyEquivalent: "")
-        item.representedObject = { [weak item] in
+        item.representedObject = { [weak self, weak item] in
+            guard let self = self else {
+                return
+            }
+
             self.preferences[keyPath: preference].toggle()
             item?.state = self.preferences[keyPath: preference] ? .on : .off
         }
@@ -195,6 +204,13 @@ private extension EKEventStore {
             lhs.startDate < rhs.startDate
         }
 
+        if let mostRecentPresentEvent = mostRecentPresentEvent,
+           mostRecentPresentEvent.hasStarted(byAtLeast: 60),
+           let nextEvent = futureEvents.first,
+           nextEvent.startDate < mostRecentPresentEvent.endDate {
+            return nextEvent
+        }
+
         return mostRecentPresentEvent ?? futureEvents.first
     }
 
@@ -214,6 +230,10 @@ private extension EKEventStore {
 private extension EKEvent {
     var isHappeningNow: Bool {
         (startDate...endDate).contains(Date())
+    }
+
+    func hasStarted(byAtLeast interval: TimeInterval) -> Bool {
+        startDate.timeIntervalSinceNow < -interval
     }
 
     func displayString(includingDuration duration: Bool) -> String {
