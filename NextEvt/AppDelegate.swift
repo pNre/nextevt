@@ -53,6 +53,7 @@ private extension AppDelegate {
     }
 
     func update(with event: EKEvent) {
+        statusBarItem.menu = makeMenu(for: event)
         statusBarItem.button?.title = event
             .displayString(includingDuration: preferences.showEventDuration)
 
@@ -70,14 +71,14 @@ private extension AppDelegate {
                 events.forEach { event in
                     self.cancelWorkItems(for: event)
 
-                    let intervalSinceStart = event.startDate.timeIntervalSinceNow
-                    if intervalSinceStart > 0 {
-                        let delay: TimeInterval = intervalSinceStart > 60 ? 60 : 1
+                    let intervalUntilStart = event.startDate.timeIntervalSinceNow
+                    if intervalUntilStart > 0 {
+                        let delay: TimeInterval = intervalUntilStart > 60 ? 60 : 1
                         self.scheduleWorkItem(for: event, after: delay) { [weak self] in
                             self?.update(with: event)
                         }
-                    } else if intervalSinceStart > -60 {
-                        self.scheduleWorkItem(for: event, after: intervalSinceStart + 60) { [weak self] in
+                    } else if intervalUntilStart > -60 {
+                        self.scheduleWorkItem(for: event, after: intervalUntilStart + 60) { [weak self] in
                             self?.refresh()
                         }
                     }
@@ -136,8 +137,18 @@ private extension AppDelegate {
         return statusBarItem
     }
 
-    func makeMenu() -> NSMenu {
+    func makeMenu(for event: EKEvent? = nil) -> NSMenu {
         let menu = NSMenu()
+        
+        if let url = event?.detectVideoCallsURL().first {
+            let item = NSMenuItem(title: "Join call", action: #selector(performAssociatedBlock), keyEquivalent: "")
+            item.representedObject = { () -> Void in
+                NSWorkspace.shared.open(url)
+            }
+            menu.addItem(item)
+            menu.addItem(.separator())
+        }
+        
         menu.addItem(makePreferenceToggleMenuItem(for: \.showEventDuration, title: "Event duration"))
         menu.addItem(makePreferenceToggleMenuItem(for: \.useSmallerFont, title: "Use a smaller font"))
         menu.addItem(.separator())
@@ -268,6 +279,36 @@ private extension EKEvent {
         components.append(title)
 
         return components.joined(separator: " ").truncated(to: 40)
+    }
+    
+    func detectVideoCallsURL() -> [URL] {
+        guard let notes = notes,
+              let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return []
+        }
+    
+        let matches = detector.matches(
+            in: notes,
+            options: [],
+            range: NSRange(notes.startIndex..<notes.endIndex, in: notes)
+        )
+        
+        return matches
+            .compactMap { match in
+                guard let range = Range(match.range, in: notes) else {
+                    return nil
+                }
+                
+                return URL(string: String(notes[range]))
+            }
+            .filter { url in
+                guard let host = url.host else {
+                    return false
+                }
+            
+                return host.hasSuffix("meet.google.com")
+                    || host.hasSuffix("zoom.us")
+            }
     }
 }
 
