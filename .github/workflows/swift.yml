@@ -13,7 +13,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
 
-      - uses: fwal/setup-swift@v1.3.0
+      - uses: fwal/setup-swift@v1.5.0
       - name: Build
         run: |
           make
