@@ -142,8 +142,19 @@ private extension AppDelegate {
         
         if let url = event?.detectVideoCallsURL().first {
             let item = NSMenuItem(title: "Join call", action: #selector(performAssociatedBlock), keyEquivalent: "")
-            item.representedObject = { () -> Void in
-                NSWorkspace.shared.open(url)
+            item.representedObject = { [weak self] () -> Void in
+                guard let webBrowser = self?.preferences.webBrowser,
+                      let webBrowserURL = NSWorkspace.shared.fullPath(forApplication: webBrowser).map(URL.init(fileURLWithPath:)) else {
+                    NSWorkspace.shared.open(url)
+                    return
+                }
+                
+                NSWorkspace.shared.open(
+                    [url],
+                    withApplicationAt: webBrowserURL,
+                    configuration: NSWorkspace.OpenConfiguration(),
+                    completionHandler: nil
+                )
             }
             menu.addItem(item)
             menu.addItem(.separator())
@@ -152,10 +163,37 @@ private extension AppDelegate {
         menu.addItem(makePreferenceToggleMenuItem(for: \.showEventDuration, title: "Event duration"))
         menu.addItem(makePreferenceToggleMenuItem(for: \.useSmallerFont, title: "Use a smaller font"))
         menu.addItem(.separator())
+        menu.addItem(makeWebBrowserMenuItem())
         menu.addItem(makePreferenceToggleMenuItem(for: \.launchAtLogin, title: "Launch at login"))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(terminateApp), keyEquivalent: ""))
         return menu
+    }
+
+    func makeWebBrowserMenuItem() -> NSMenuItem {
+        let browsers = ["Safari", "Firefox", "Google Chrome"]
+        let submenu = NSMenu()
+        let item = NSMenuItem(title: "Join calls in", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        
+        func updateSubmenu() {
+            submenu.removeAllItems()
+            
+            browsers.forEach { browser in
+                submenu.addItem(
+                    makeValueToggleMenuItem(
+                        for: \.webBrowser,
+                        title: browser,
+                        value: browser,
+                        onSelect: updateSubmenu
+                    )
+                )
+            }
+        }
+        
+        updateSubmenu()
+        
+        return item
     }
 
     func makePreferenceToggleMenuItem(for preference: WritableKeyPath<Preferences, Bool>, title: String) -> NSMenuItem {
@@ -169,6 +207,25 @@ private extension AppDelegate {
             item?.state = self.preferences[keyPath: preference] ? .on : .off
         }
         item.state = preferences[keyPath: preference] ? .on : .off
+        return item
+    }
+
+    func makeValueToggleMenuItem(
+        for preference: WritableKeyPath<Preferences, String?>,
+        title: String,
+        value: String?,
+        onSelect: @escaping () -> Void
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(performAssociatedBlock), keyEquivalent: "")
+        item.representedObject = { [weak self] in
+            if self?.preferences[keyPath: preference] == value {
+                self?.preferences[keyPath: preference] = nil
+            } else {
+                self?.preferences[keyPath: preference] = value
+            }
+            onSelect()
+        }
+        item.state = preferences[keyPath: preference] == value ? .on : .off
         return item
     }
 }

@@ -23,4 +23,9 @@ struct Preferences {
         get { LaunchAtLogin.isEnabled }
         set { LaunchAtLogin.isEnabled = newValue }
     }
+    
+    var webBrowser: String? {
+        get { UserDefaults.standard.string(forKey: "webBrowser") }
+        set { UserDefaults.standard.set(newValue, forKey: "webBrowser") }
+    }
 }
