@@ -290,7 +290,7 @@ private extension EKEventStore {
         let predicate = predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
         let eligibleEvents = events(matching: predicate)
             .lazy
-            .filter { !$0.isAllDay && $0.status != .canceled }
+            .filter { !$0.isAllDay && $0.isCurrentUserAttending }
         return AnyBidirectionalCollection(eligibleEvents)
     }
 }
@@ -298,6 +298,20 @@ private extension EKEventStore {
 private extension EKEvent {
     var isHappeningNow: Bool {
         (startDate...endDate).contains(Date())
+    }
+    
+    var isCurrentUserAttending: Bool {
+        guard status != .canceled else {
+            return false
+        }
+        
+        guard let attendees = attendees else {
+            return true
+        }
+    
+        return !attendees.contains { participant in
+            participant.isCurrentUser && participant.participantStatus == .declined
+        }
     }
 
     func hasStarted(byAtLeast interval: TimeInterval) -> Bool {
