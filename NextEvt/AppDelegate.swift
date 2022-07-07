@@ -18,7 +18,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-    private var scheduledWorkItems: [String: [DispatchWorkItem]] = [:]
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         refresh()
@@ -56,66 +55,37 @@ private extension AppDelegate {
         statusBarItem.menu = makeMenu(for: event)
         statusBarItem.button?.title = event
             .displayString(includingDuration: preferences.showEventDuration)
-
-        scheduleRefresh()
     }
 
     func scheduleRefresh() {
-        eventStore.attempt { eventStore -> AnyBidirectionalCollection<EKEvent> in
-            eventStore.availableEvents()
+        eventStore.attempt { eventStore -> EKEvent? in
+            eventStore.nextEvent()
         } completion: { result in
             switch result {
-            case let .success(events):
-                self.pruneScheduledWorkItems(for: events)
+            case let .success(nextEvent?):
+                let interval: Int
+                if nextEvent.isHappeningNow,
+                   nextEvent.endDate.timeIntervalSinceNow > 60 {
+                    interval = 60
+                } else if nextEvent.isHappeningNow {
+                    interval = max(1, Int(nextEvent.endDate.timeIntervalSinceNow.rounded()))
+                } else if nextEvent.startDate.timeIntervalSinceNow > 60 {
+                    interval = 60
+                } else {
+                    interval = 1
+                }
 
-                events.forEach { event in
-                    self.cancelWorkItems(for: event)
-
-                    let intervalUntilStart = event.startDate.timeIntervalSinceNow
-                    if intervalUntilStart > 0 {
-                        let delay: TimeInterval = intervalUntilStart > 60 ? 60 : 1
-                        self.scheduleWorkItem(for: event, after: delay) { [weak self] in
-                            self?.update(with: event)
-                        }
-                    } else if intervalUntilStart > -60 {
-                        self.scheduleWorkItem(for: event, after: intervalUntilStart + 60) { [weak self] in
-                            self?.refresh()
-                        }
-                    }
-
-                    self.scheduleWorkItem(for: event, after: event.endDate.timeIntervalSinceNow + 1) { [weak self] in
-                        self?.refresh()
-                    }
+                DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(interval)) {
+                    self.refresh()
+                }
+            case .success:
+                DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(30)) {
+                    self.refresh()
                 }
             case .failure:
                 break
             }
         }
-    }
-}
-
-private extension AppDelegate {
-    func pruneScheduledWorkItems<C: Collection>(for events: C) where C.Element == EKEvent {
-        let eventIds = Set(events.compactMap { $0.eventIdentifier })
-        let scheduledEventIds = Set(scheduledWorkItems.keys)
-
-        scheduledEventIds.subtracting(eventIds).forEach { key in
-            self.scheduledWorkItems.removeValue(forKey: key)
-        }
-    }
-
-    func cancelWorkItems(for event: EKEvent) {
-        scheduledWorkItems[event.eventIdentifier]?.forEach {
-            $0.cancel()
-        }
-
-        scheduledWorkItems[event.eventIdentifier]?.removeAll()
-    }
-
-    func scheduleWorkItem(for event: EKEvent, after delay: TimeInterval, _ work: @escaping () -> Void) {
-        let workItem = DispatchWorkItem(block: work)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
-        scheduledWorkItems[event.eventIdentifier, default: []].append(workItem)
     }
 }
 
@@ -268,18 +238,19 @@ private extension EKEventStore {
         let presentEvents = events.prefix { $0.isHappeningNow }
         let futureEvents = events.dropFirst(presentEvents.count)
 
-        let mostRecentPresentEvent = presentEvents.max { lhs, rhs in
-            lhs.startDate < rhs.startDate
+        if let currentEvent = presentEvents.last,
+           let nextEvent = futureEvents.first {
+            let intervalToNextEvent = nextEvent.startDate.timeIntervalSince(currentEvent.endDate)
+            if intervalToNextEvent < 60 {
+                return currentEvent
+            } else {
+                return nextEvent
+            }
+        } else if let currentEvent = presentEvents.last {
+            return currentEvent
+        } else {
+            return futureEvents.first
         }
-
-        if let mostRecentPresentEvent = mostRecentPresentEvent,
-           mostRecentPresentEvent.hasStarted(byAtLeast: 60),
-           let nextEvent = futureEvents.first,
-           nextEvent.startDate < mostRecentPresentEvent.endDate {
-            return nextEvent
-        }
-
-        return mostRecentPresentEvent ?? futureEvents.first
     }
 
     func availableEvents(startingFrom startDate: Date = Date()) -> AnyBidirectionalCollection<EKEvent> {
@@ -291,6 +262,7 @@ private extension EKEventStore {
         let eligibleEvents = events(matching: predicate)
             .lazy
             .filter { !$0.isAllDay && $0.isCurrentUserAttending }
+            .sorted { lhs, rhs in lhs.startDate < rhs.startDate }
         return AnyBidirectionalCollection(eligibleEvents)
     }
 }
@@ -304,7 +276,7 @@ private extension EKEvent {
         guard status != .canceled else {
             return false
         }
-        
+
         guard let attendees = attendees else {
             return true
         }
