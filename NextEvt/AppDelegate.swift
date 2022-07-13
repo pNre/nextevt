@@ -240,8 +240,10 @@ private extension EKEventStore {
 
         if let currentEvent = presentEvents.last,
            let nextEvent = futureEvents.first {
-            let intervalToNextEvent = nextEvent.startDate.timeIntervalSince(currentEvent.endDate)
-            if intervalToNextEvent < 60 {
+            let intervalBetweenEvents = nextEvent.startDate.timeIntervalSince(currentEvent.endDate)
+            let intervalToCurrentEventEnd = currentEvent.endDate.timeIntervalSinceNow
+            if intervalBetweenEvents >= 0,
+               intervalToCurrentEventEnd > currentEvent.endDate.timeIntervalSince(currentEvent.startDate) / 2 {
                 return currentEvent
             } else {
                 return nextEvent
