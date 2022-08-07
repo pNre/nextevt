@@ -9,7 +9,14 @@ import Cocoa
 import EventKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private enum Constants {
+        static var supportedCallHosts: [String] {
+            ["meet.google.com", "zoom.us", "facetime.apple.com"]
+        }
+    }
+
     private lazy var statusBarItem = makeStatusItem()
+    private lazy var callMenuItems = makeCallMenuItems()
     private lazy var eventStore = EKEventStore()
     private var preferences = Preferences() {
         didSet {
@@ -52,9 +59,8 @@ private extension AppDelegate {
     }
 
     func update(with event: EKEvent) {
-        statusBarItem.menu = makeMenu(for: event)
-        statusBarItem.button?.title = event
-            .displayString(includingDuration: preferences.showEventDuration)
+        statusBarItem.button?.title = event.displayString(includingDuration: preferences.showEventDuration)
+        updateMenu(for: event)
     }
 
     func scheduleRefresh() {
@@ -97,6 +103,30 @@ private extension AppDelegate {
 }
 
 private extension AppDelegate {
+    private func updateMenu(for event: EKEvent) {
+        if let url = event.detectCallURL(supportedHosts: Constants.supportedCallHosts).first {
+            callMenuItems.forEach { $0.isHidden = false }
+            callMenuItems.first?.representedObject = { [weak self] () -> Void in
+                guard let webBrowser = self?.preferences.webBrowser,
+                      let webBrowserURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: webBrowser) else {
+                    NSWorkspace.shared.open(url)
+                    return
+                }
+
+                NSWorkspace.shared.open(
+                    [url],
+                    withApplicationAt: webBrowserURL,
+                    configuration: NSWorkspace.OpenConfiguration(),
+                    completionHandler: nil
+                )
+            }
+        } else {
+            callMenuItems.forEach { $0.isHidden = true }
+        }
+    }
+}
+
+private extension AppDelegate {
     func makeStatusItem() -> NSStatusItem {
         let statusBar = NSStatusBar.system
         statusBarItem = statusBar.statusItem(withLength: NSStatusItem.variableLength)
@@ -109,27 +139,8 @@ private extension AppDelegate {
 
     func makeMenu(for event: EKEvent? = nil) -> NSMenu {
         let menu = NSMenu()
-        
-        if let url = event?.detectVideoCallsURL().first {
-            let item = NSMenuItem(title: "Join call", action: #selector(performAssociatedBlock), keyEquivalent: "")
-            item.representedObject = { [weak self] () -> Void in
-                guard let webBrowser = self?.preferences.webBrowser,
-                      let webBrowserURL = NSWorkspace.shared.fullPath(forApplication: webBrowser).map(URL.init(fileURLWithPath:)) else {
-                    NSWorkspace.shared.open(url)
-                    return
-                }
-                
-                NSWorkspace.shared.open(
-                    [url],
-                    withApplicationAt: webBrowserURL,
-                    configuration: NSWorkspace.OpenConfiguration(),
-                    completionHandler: nil
-                )
-            }
-            menu.addItem(item)
-            menu.addItem(.separator())
-        }
-        
+
+        callMenuItems.forEach(menu.addItem)
         menu.addItem(makePreferenceToggleMenuItem(for: \.showEventDuration, title: "Event duration"))
         menu.addItem(makePreferenceToggleMenuItem(for: \.useSmallerFont, title: "Use a smaller font"))
         menu.addItem(.separator())
@@ -140,8 +151,19 @@ private extension AppDelegate {
         return menu
     }
 
+    func makeCallMenuItems() -> [NSMenuItem] {
+        let items = [
+            NSMenuItem(title: "Join call", action: #selector(performAssociatedBlock), keyEquivalent: ""),
+            .separator()
+        ]
+
+        items.forEach { $0.isHidden = true }
+
+        return items
+    }
+
     func makeWebBrowserMenuItem() -> NSMenuItem {
-        let browsers = ["Safari", "Firefox", "Google Chrome"]
+        let browsers = findWebBrowsers()
         let submenu = NSMenu()
         let item = NSMenuItem(title: "Join calls in", action: nil, keyEquivalent: "")
         item.submenu = submenu
@@ -149,18 +171,18 @@ private extension AppDelegate {
         func updateSubmenu() {
             submenu.removeAllItems()
             
-            browsers.forEach { browser in
+            browsers.forEach { (bundle, name) in
                 submenu.addItem(
                     makeValueToggleMenuItem(
                         for: \.webBrowser,
-                        title: browser,
-                        value: browser,
+                        title: name,
+                        value: bundle,
                         onSelect: updateSubmenu
                     )
                 )
             }
         }
-        
+
         updateSubmenu()
         
         return item
@@ -207,6 +229,38 @@ private extension AppDelegate {
 
     @objc func performAssociatedBlock(sender: NSMenuItem) {
         (sender.representedObject as? () -> Void)?()
+    }
+
+    func findWebBrowsers() -> [(String, String)] {
+        guard let url = URL(string: "https://"),
+              let appURLs = LSCopyApplicationURLsForURL(url as CFURL, .viewer)?.takeRetainedValue() as? [URL]
+        else {
+            return []
+        }
+
+        return appURLs
+            .compactMap(Bundle.init(url:))
+            .compactMap { bundle in
+                guard let identifier = bundle.bundleIdentifier,
+                      let name = bundle.localizedDisplayName
+                else {
+                    return nil
+                }
+
+                return (identifier, name)
+            }
+            .sorted { lhs, rhs in lhs.0.localizedCaseInsensitiveCompare(lhs.1) == .orderedAscending }
+    }
+}
+
+private extension Bundle {
+    var localizedDisplayName: String? {
+        [
+            localizedInfoDictionary?["CFBundleDisplayName"] as? String,
+            localizedInfoDictionary?["CFBundleName"] as? String,
+            infoDictionary?["CFBundleDisplayName"] as? String,
+            infoDictionary?["CFBundleName"] as? String
+        ].compactMap { $0 }.first
     }
 }
 
@@ -326,33 +380,29 @@ private extension EKEvent {
         return components.joined(separator: " ").truncated(to: 40)
     }
     
-    func detectVideoCallsURL() -> [URL] {
-        guard let notes = notes,
+    func detectCallURL(supportedHosts: [String]) -> [URL] {
+        let fields = [location, notes].compactMap { $0 }
+
+        guard !fields.isEmpty,
               let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
             return []
         }
-    
-        let matches = detector.matches(
-            in: notes,
-            options: [],
-            range: NSRange(notes.startIndex..<notes.endIndex, in: notes)
-        )
-        
-        return matches
-            .compactMap { match in
-                guard let range = Range(match.range, in: notes) else {
-                    return nil
-                }
-                
-                return URL(string: String(notes[range]))
+
+        return fields
+            .flatMap { field in
+                detector.matches(
+                    in: field,
+                    options: [],
+                    range: NSRange(field.startIndex..<field.endIndex, in: field)
+                )
             }
+            .compactMap(\.url)
             .filter { url in
                 guard let host = url.host else {
                     return false
                 }
-            
-                return host.hasSuffix("meet.google.com")
-                    || host.hasSuffix("zoom.us")
+
+                return supportedHosts.contains(where: host.hasSuffix)
             }
     }
 }
